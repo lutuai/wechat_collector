@@ -215,10 +215,14 @@ class WeChatArticleCollectorGUI:
             return
         
         # 验证URL格式
-        if not self.is_valid_wechat_url(url):
-            result = messagebox.askyesno("确认", "链接格式可能不正确，是否继续？")
+        url_validation = self.validate_url_with_confidence(url)
+        if url_validation['confidence'] == 'low':
+            result = messagebox.askyesno("确认", f"链接格式可能不正确：{url_validation['reason']}\n是否继续？")
             if not result:
                 return
+        elif url_validation['confidence'] == 'invalid':
+            messagebox.showerror("错误", f"无效的链接格式：{url_validation['reason']}")
+            return
         
         # 开始工作
         self.is_working = True
@@ -315,16 +319,111 @@ class WeChatArticleCollectorGUI:
     
     def is_valid_wechat_url(self, url):
         """验证是否为有效的微信文章URL"""
+        import re
+        
+        # 更全面的微信文章URL模式
         wechat_patterns = [
-            r'mp\.weixin\.qq\.com',
-            r'weixin\.qq\.com'
+            # 标准微信公众号文章链接
+            r'https?://mp\.weixin\.qq\.com/s/',
+            r'https?://mp\.weixin\.qq\.com/s\?',
+            # 微信内部链接
+            r'https?://weixin\.qq\.com/',
+            # 短链接形式
+            r'https?://.*\.weixin\.qq\.com/',
+            # 包含__biz参数的链接（微信文章特有）
+            r'.*__biz=.*',
+            # 包含mid参数的链接
+            r'.*mid=.*',
+            # 包含sn参数的链接（微信文章特有）
+            r'.*sn=.*'
         ]
         
+        url_lower = url.lower().strip()
+        
+        # 基本URL格式检查
+        if not url_lower.startswith(('http://', 'https://')):
+            return False
+        
+        # 检查是否匹配微信文章模式
         for pattern in wechat_patterns:
-            if pattern in url.lower():
+            if re.search(pattern, url_lower):
+                return True
+        
+        # 如果包含微信相关的关键参数，也认为是有效的
+        wechat_params = ['__biz', 'mid', 'sn', 'idx']
+        for param in wechat_params:
+            if param in url_lower:
                 return True
         
         return False
+    
+    def validate_url_with_confidence(self, url):
+        """
+        智能验证URL，返回置信度和原因
+        
+        Returns:
+            dict: {
+                'confidence': 'high'|'medium'|'low'|'invalid',
+                'reason': '原因说明'
+            }
+        """
+        import re
+        from urllib.parse import urlparse, parse_qs
+        
+        url = url.strip()
+        
+        # 基本格式检查
+        if not url:
+            return {'confidence': 'invalid', 'reason': '链接为空'}
+        
+        if not url.startswith(('http://', 'https://')):
+            return {'confidence': 'invalid', 'reason': '链接必须以http://或https://开头'}
+        
+        try:
+            parsed = urlparse(url)
+            if not parsed.netloc:
+                return {'confidence': 'invalid', 'reason': '链接格式不正确'}
+        except Exception:
+            return {'confidence': 'invalid', 'reason': '链接格式不正确'}
+        
+        url_lower = url.lower()
+        
+        # 高置信度：标准微信文章链接
+        high_confidence_patterns = [
+            r'https?://mp\.weixin\.qq\.com/s/',
+            r'https?://mp\.weixin\.qq\.com/s\?'
+        ]
+        
+        for pattern in high_confidence_patterns:
+            if re.search(pattern, url_lower):
+                return {'confidence': 'high', 'reason': '标准微信文章链接'}
+        
+        # 中等置信度：包含微信特有参数
+        wechat_params = ['__biz', 'sn', 'mid', 'idx']
+        has_wechat_params = any(param in url_lower for param in wechat_params)
+        
+        if has_wechat_params:
+            return {'confidence': 'high', 'reason': '包含微信文章参数'}
+        
+        # 中等置信度：微信相关域名
+        wechat_domains = [
+            'weixin.qq.com',
+            'wx.qq.com',
+            'mp.weixin.qq.com'
+        ]
+        
+        parsed_url = urlparse(url_lower)
+        domain = parsed_url.netloc
+        
+        for wechat_domain in wechat_domains:
+            if wechat_domain in domain:
+                return {'confidence': 'medium', 'reason': '微信相关域名'}
+        
+        # 低置信度：其他HTTP链接
+        if url_lower.startswith(('http://', 'https://')):
+            return {'confidence': 'low', 'reason': '非微信域名，但可能是有效链接'}
+        
+        return {'confidence': 'invalid', 'reason': '不是有效的网页链接'}
     
     def on_closing(self):
         """窗口关闭事件"""
