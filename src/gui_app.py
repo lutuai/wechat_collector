@@ -75,7 +75,7 @@ class WeChatArticleCollectorGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
+        main_frame.rowconfigure(5, weight=1)
         
         # 标题
         title_label = ttk.Label(main_frame, text="微信文章采集器 - WeChatScribe", 
@@ -141,8 +141,7 @@ class WeChatArticleCollectorGUI:
         button_frame.grid(row=4, column=0, columnspan=3, pady=(0, 10))
         
         self.collect_button = ttk.Button(button_frame, text="开始采集", 
-                                        command=self.start_collection, 
-                                        style="Accent.TButton")
+                                        command=self.start_collection)
         self.collect_button.pack(side=tk.LEFT, padx=(0, 10))
         
         self.stop_button = ttk.Button(button_frame, text="停止", 
