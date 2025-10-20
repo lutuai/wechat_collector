@@ -395,6 +395,7 @@ class WeChatArticleCollectorGUI:
             self.log_message(f"仅原创文章: {'是' if original_only else '否'}")
             
             # 解析公众号文章列表
+            self.log_message("正在解析公众号文章列表...")
             articles = self.profile_parser.parse_profile_articles(url, max_count=article_count * 2)
             
             if not self.is_working:
@@ -402,6 +403,10 @@ class WeChatArticleCollectorGUI:
             
             self.update_progress(15)
             self.log_message(f"找到 {len(articles)} 篇文章")
+            
+            # 显示找到的文章信息（用于调试）
+            for i, article in enumerate(articles[:3]):  # 只显示前3篇
+                self.log_message(f"  {i+1}. {article['title']} (阅读量: {article['read_count']})")
             
             # 筛选文章
             filtered_articles = self.profile_parser.filter_articles_by_criteria(
