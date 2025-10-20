@@ -83,7 +83,12 @@ class WeChatProfileParser:
             
             # 方法4: 如果仍然没有文章，生成一些模拟数据用于演示
             if len(articles) == 0:
-                print("警告: 无法从页面获取文章列表，将生成模拟数据用于演示")
+                print("警告: 无法从页面获取文章列表，可能的原因:")
+                print("1. 文章链接已过期或无效")
+                print("2. 微信反爬虫机制阻止访问")
+                print("3. 需要在微信内打开链接")
+                print("建议: 请尝试使用最新的、可以正常访问的微信文章链接")
+                print("为了演示功能，将生成模拟数据...")
                 mock_articles = self._generate_mock_articles(author_info, article_url, max_count)
                 articles.extend(mock_articles)
             
@@ -310,32 +315,27 @@ class WeChatProfileParser:
     def _extract_current_article_info(self, soup, article_url, author_info):
         """提取当前文章的信息作为备选"""
         try:
-            # 从当前页面提取文章信息
-            from article_parser import WeChatArticleParser
-            
-            # 创建临时解析器来获取当前文章信息
-            temp_parser = WeChatArticleParser()
-            current_article_data = temp_parser.parse_article(article_url)
-            
-            # 转换为标准格式
+            # 直接从当前页面的soup中提取信息，不依赖其他解析器
             article = {
-                'title': current_article_data.get('title', ''),
+                'title': self._extract_title_from_soup(soup),
                 'url': article_url,
-                'publish_time': current_article_data.get('publish_time', ''),
-                'is_original': False,  # 默认值，后续可以检测
+                'publish_time': self._extract_publish_time_from_soup(soup),
+                'is_original': False,
                 'read_count': 1000,  # 给一个默认值，确保能通过筛选
                 'like_count': 0,
-                'author': current_article_data.get('author', author_info['name']),
+                'author': self._extract_author_from_soup(soup) or author_info['name'],
                 'digest': ''
             }
             
             # 检查是否为原创
-            if '原创' in soup.get_text():
+            page_text = soup.get_text()
+            if '原创' in page_text:
                 article['is_original'] = True
             
             return article
             
-        except Exception:
+        except Exception as e:
+            print(f"提取当前文章信息失败: {e}")
             return None
     
     def _generate_mock_articles(self, author_info, base_url, count=10):
@@ -369,6 +369,79 @@ class WeChatProfileParser:
             pass
         
         return articles
+    
+    def _extract_title_from_soup(self, soup):
+        """从soup中提取文章标题"""
+        # 尝试多种选择器
+        selectors = [
+            '#activity-name',
+            '.rich_media_title',
+            'h1.rich_media_title',
+            'h2.rich_media_title',
+            'h1',
+            'h2',
+            'title'
+        ]
+        
+        for selector in selectors:
+            element = soup.select_one(selector)
+            if element:
+                title = element.get_text().strip()
+                if title and title != '微信公众平台' and len(title) > 1:
+                    return self._clean_text(title)
+        
+        return "未知标题"
+    
+    def _extract_author_from_soup(self, soup):
+        """从soup中提取作者信息"""
+        selectors = [
+            '#js_name',
+            '.rich_media_meta_text',
+            '.profile_nickname',
+            '[id*="author"]',
+            '.author'
+        ]
+        
+        for selector in selectors:
+            element = soup.select_one(selector)
+            if element:
+                author = element.get_text().strip()
+                if author and len(author) > 0:
+                    return self._clean_text(author)
+        
+        return None
+    
+    def _extract_publish_time_from_soup(self, soup):
+        """从soup中提取发布时间"""
+        selectors = [
+            '#publish_time',
+            '.rich_media_meta_text',
+            '[id*="time"]',
+            '[class*="time"]'
+        ]
+        
+        for selector in selectors:
+            element = soup.select_one(selector)
+            if element:
+                time_text = element.get_text().strip()
+                # 尝试匹配时间格式
+                time_pattern = r'\d{4}-\d{2}-\d{2}|\d{4}年\d{1,2}月\d{1,2}日'
+                match = re.search(time_pattern, time_text)
+                if match:
+                    return match.group()
+        
+        return ""
+    
+    def _clean_text(self, text):
+        """清理文本内容"""
+        if not text:
+            return ""
+        
+        # 移除多余的空白字符
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
+        
+        return text
     
     def get_article_stats(self, article_url):
         """
