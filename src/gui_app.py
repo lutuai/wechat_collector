@@ -12,6 +12,7 @@ from datetime import datetime
 from article_parser import WeChatArticleParser
 from markdown_converter import MarkdownConverter
 from file_manager import FileManager
+from wechat_profile_parser import WeChatProfileParser
 from config.settings import DEFAULT_OUTPUT_DIR
 
 
@@ -29,6 +30,7 @@ class WeChatArticleCollectorGUI:
         self.parser = WeChatArticleParser()
         self.converter = MarkdownConverter()
         self.file_manager = FileManager()
+        self.profile_parser = WeChatProfileParser()
         
         # 工作线程
         self.worker_thread = None
@@ -37,7 +39,7 @@ class WeChatArticleCollectorGUI:
     def setup_window(self):
         """设置窗口属性"""
         self.root.title("微信文章采集器 - WeChatScribe")
-        self.root.geometry("800x600")
+        self.root.geometry("900x700")
         self.root.resizable(True, True)
         
         # 设置窗口图标（如果有的话）
@@ -56,6 +58,12 @@ class WeChatArticleCollectorGUI:
         self.output_dir_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
         self.progress_var = tk.DoubleVar()
         self.status_var = tk.StringVar(value="就绪")
+        
+        # 批量采集相关变量
+        self.batch_mode_var = tk.BooleanVar(value=False)
+        self.article_count_var = tk.StringVar(value="10")
+        self.min_read_count_var = tk.StringVar(value="100")
+        self.original_only_var = tk.BooleanVar(value=False)
     
     def setup_widgets(self):
         """创建界面组件"""
@@ -75,7 +83,7 @@ class WeChatArticleCollectorGUI:
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
         
         # URL输入区域
-        url_frame = ttk.LabelFrame(main_frame, text="文章链接", padding="10")
+        url_frame = ttk.LabelFrame(main_frame, text="文章链接（单篇模式）/ 公众号任意文章链接（批量模式）", padding="10")
         url_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         url_frame.columnconfigure(0, weight=1)
         
@@ -88,9 +96,38 @@ class WeChatArticleCollectorGUI:
         clear_button = ttk.Button(url_frame, text="清空", command=self.clear_url)
         clear_button.grid(row=0, column=2, padx=(5, 0))
         
+        # 批量采集配置区域
+        batch_frame = ttk.LabelFrame(main_frame, text="批量采集设置", padding="10")
+        batch_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        batch_frame.columnconfigure(1, weight=1)
+        
+        # 批量模式开关
+        self.batch_mode_check = ttk.Checkbutton(batch_frame, text="启用批量采集模式", 
+                                               variable=self.batch_mode_var,
+                                               command=self.toggle_batch_mode)
+        self.batch_mode_check.grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=(0, 10))
+        
+        # 文章数量设置
+        ttk.Label(batch_frame, text="采集文章数量:").grid(row=1, column=0, sticky=tk.W, padx=(20, 5))
+        self.article_count_entry = ttk.Entry(batch_frame, textvariable=self.article_count_var, width=10)
+        self.article_count_entry.grid(row=1, column=1, sticky=tk.W, padx=(0, 20))
+        
+        # 最小阅读量设置
+        ttk.Label(batch_frame, text="最小阅读量:").grid(row=1, column=2, sticky=tk.W, padx=(0, 5))
+        self.min_read_count_entry = ttk.Entry(batch_frame, textvariable=self.min_read_count_var, width=10)
+        self.min_read_count_entry.grid(row=1, column=3, sticky=tk.W)
+        
+        # 仅原创文章选项
+        self.original_only_check = ttk.Checkbutton(batch_frame, text="仅下载原创文章", 
+                                                  variable=self.original_only_var)
+        self.original_only_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=(10, 0))
+        
+        # 初始状态设置为禁用
+        self.toggle_batch_mode()
+        
         # 输出目录选择区域
         dir_frame = ttk.LabelFrame(main_frame, text="保存目录", padding="10")
-        dir_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        dir_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         dir_frame.columnconfigure(0, weight=1)
         
         self.dir_entry = ttk.Entry(dir_frame, textvariable=self.output_dir_var, font=("Arial", 10))
@@ -101,7 +138,7 @@ class WeChatArticleCollectorGUI:
         
         # 操作按钮区域
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=3, column=0, columnspan=3, pady=(0, 10))
+        button_frame.grid(row=4, column=0, columnspan=3, pady=(0, 10))
         
         self.collect_button = ttk.Button(button_frame, text="开始采集", 
                                         command=self.start_collection, 
@@ -119,7 +156,7 @@ class WeChatArticleCollectorGUI:
         
         # 进度和状态区域
         progress_frame = ttk.LabelFrame(main_frame, text="进度和状态", padding="10")
-        progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        progress_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         progress_frame.columnconfigure(0, weight=1)
         progress_frame.rowconfigure(1, weight=1)
         
@@ -157,6 +194,22 @@ class WeChatArticleCollectorGUI:
         """清空URL"""
         self.url_var.set("")
         self.url_entry.focus()
+    
+    def toggle_batch_mode(self):
+        """切换批量模式"""
+        is_batch = self.batch_mode_var.get()
+        
+        # 启用/禁用批量相关控件
+        state = tk.NORMAL if is_batch else tk.DISABLED
+        self.article_count_entry.config(state=state)
+        self.min_read_count_entry.config(state=state)
+        self.original_only_check.config(state=state)
+        
+        # 更新URL输入框的提示
+        if is_batch:
+            self.url_entry.config(foreground='blue')
+        else:
+            self.url_entry.config(foreground='black')
     
     def browse_directory(self):
         """浏览目录"""
@@ -224,6 +277,22 @@ class WeChatArticleCollectorGUI:
             messagebox.showerror("错误", f"无效的链接格式：{url_validation['reason']}")
             return
         
+        # 批量模式验证
+        is_batch = self.batch_mode_var.get()
+        if is_batch:
+            try:
+                article_count = int(self.article_count_var.get())
+                min_read_count = int(self.min_read_count_var.get())
+                if article_count <= 0 or article_count > 50:
+                    messagebox.showerror("错误", "文章数量必须在1-50之间")
+                    return
+                if min_read_count < 0:
+                    messagebox.showerror("错误", "最小阅读量不能为负数")
+                    return
+            except ValueError:
+                messagebox.showerror("错误", "请输入有效的数字")
+                return
+        
         # 开始工作
         self.is_working = True
         self.collect_button.config(state=tk.DISABLED)
@@ -233,8 +302,12 @@ class WeChatArticleCollectorGUI:
         self.log_text.delete(1.0, tk.END)
         
         # 启动工作线程
-        self.worker_thread = threading.Thread(target=self.collection_worker, 
-                                             args=(url, output_dir))
+        if is_batch:
+            self.worker_thread = threading.Thread(target=self.batch_collection_worker, 
+                                                 args=(url, output_dir))
+        else:
+            self.worker_thread = threading.Thread(target=self.collection_worker, 
+                                                 args=(url, output_dir))
         self.worker_thread.daemon = True
         self.worker_thread.start()
     
@@ -302,6 +375,119 @@ class WeChatArticleCollectorGUI:
             
             # 显示错误消息
             self.root.after(0, lambda: messagebox.showerror("错误", f"采集失败:\n{error_msg}"))
+        
+        finally:
+            # 恢复按钮状态
+            self.root.after(0, self.collection_finished)
+    
+    def batch_collection_worker(self, url, output_dir):
+        """批量采集工作线程"""
+        try:
+            # 获取批量采集参数
+            article_count = int(self.article_count_var.get())
+            min_read_count = int(self.min_read_count_var.get())
+            original_only = self.original_only_var.get()
+            
+            self.update_status("正在获取文章列表...")
+            self.update_progress(5)
+            self.log_message("开始批量采集...")
+            self.log_message(f"目标文章数量: {article_count}")
+            self.log_message(f"最小阅读量: {min_read_count}")
+            self.log_message(f"仅原创文章: {'是' if original_only else '否'}")
+            
+            # 解析公众号文章列表
+            articles = self.profile_parser.parse_profile_articles(url, max_count=article_count * 2)
+            
+            if not self.is_working:
+                return
+            
+            self.update_progress(15)
+            self.log_message(f"找到 {len(articles)} 篇文章")
+            
+            # 筛选文章
+            filtered_articles = self.profile_parser.filter_articles_by_criteria(
+                articles, min_read_count, original_only
+            )
+            
+            if not filtered_articles:
+                self.log_message("没有找到符合条件的文章", "WARN")
+                self.update_status("未找到符合条件的文章")
+                return
+            
+            # 限制文章数量
+            target_articles = filtered_articles[:article_count]
+            self.log_message(f"筛选后符合条件的文章: {len(target_articles)} 篇")
+            
+            if not self.is_working:
+                return
+            
+            self.update_progress(25)
+            
+            # 批量下载文章
+            success_count = 0
+            total_articles = len(target_articles)
+            
+            for i, article_info in enumerate(target_articles):
+                if not self.is_working:
+                    break
+                
+                try:
+                    self.log_message(f"正在处理第 {i+1}/{total_articles} 篇文章: {article_info['title']}")
+                    self.update_status(f"正在处理第 {i+1}/{total_articles} 篇文章...")
+                    
+                    # 获取文章详细内容
+                    detailed_article = self.parser.parse_article(article_info['url'])
+                    
+                    # 合并文章信息
+                    detailed_article.update({
+                        'is_original': article_info.get('is_original', False),
+                        'read_count': article_info.get('read_count', 0),
+                        'like_count': article_info.get('like_count', 0)
+                    })
+                    
+                    if not self.is_working:
+                        break
+                    
+                    # 转换为Markdown
+                    markdown_content = self.converter.convert_to_markdown(
+                        detailed_article, output_dir
+                    )
+                    
+                    if not self.is_working:
+                        break
+                    
+                    # 保存文件
+                    filepath = self.file_manager.save_article(
+                        detailed_article, markdown_content, output_dir
+                    )
+                    
+                    success_count += 1
+                    self.log_message(f"文章保存成功: {filepath}", "SUCCESS")
+                    
+                    # 更新进度
+                    progress = 25 + (70 * (i + 1) / total_articles)
+                    self.update_progress(progress)
+                    
+                except Exception as e:
+                    self.log_message(f"处理文章失败 '{article_info['title']}': {str(e)}", "ERROR")
+                    continue
+            
+            self.update_progress(100)
+            self.update_status("批量采集完成")
+            self.log_message(f"批量采集完成！成功采集 {success_count}/{total_articles} 篇文章", "SUCCESS")
+            
+            # 显示成功消息
+            self.root.after(0, lambda: messagebox.showinfo(
+                "成功", f"批量采集完成！\n成功采集: {success_count} 篇文章\n保存位置: {output_dir}"
+            ))
+            
+        except Exception as e:
+            error_msg = str(e)
+            self.log_message(f"批量采集失败: {error_msg}", "ERROR")
+            self.update_status("批量采集失败")
+            
+            # 显示错误消息
+            self.root.after(0, lambda: messagebox.showerror("错误", f"批量采集失败:\n{error_msg}"))
         
         finally:
             # 恢复按钮状态
